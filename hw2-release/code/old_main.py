@@ -195,11 +195,7 @@ def main():
 
 def inv_normalize(y, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]):
     # Function for inverse normalization
-    if isinstance(y, torch.Tensor) :
-        x = y.new(*y.size())
-    else:
-        x = np.zeros(y.shape)
-        
+    x = y.new(*y.size())
     x[0, :, :] = y[0, :, :] * std[0] + mean[0]
     x[1, :, :] = y[1, :, :] * std[1] + mean[1]
     x[2, :, :] = y[2, :, :] * std[2] + mean[2]
@@ -240,39 +236,27 @@ def train(train_loader, model, criterion, optimizer, epoch, log, vis):
         pool_res = F.sigmoid(F.max_pool2d(output, output.size()[2]))
         pool_res = pool_res.view(pool_res.size()[0], -1)
 
-        if i == 0 and epoch % 15 == 0:
-            all_gt_classes = target.cpu().numpy()
-            input_images = input.cpu().numpy()
-            heat_maps = output.data.cpu().numpy()
-
-            log.image_summary('{} epoch input image'.format(epoch), input_images, epoch)
+        if i == 0 and epoch%7 == 0:
+            gt_classes = target.cpu().numpy()[0]
+            input_image = input.cpu()[0]
+            input_image = inv_normalize(input_image).numpy()
             
-
-            for k in range(32):
-                gt_classes = all_gt_classes[k]
-                input_image = input_images[k]
-                input_image = inv_normalize(input_image)
-                
-                #vis.text('{} Input image'.format(episode * epoch + i))
-                vis.image(input_image,
-                    opts=dict(title='Raw Image {}'.format(k), 
-                        caption='{} iteration input image'.format(episode * epoch + i)))
-                print(gt_classes)
-                #vis.text('{} HeatMap'.format(episode * epoch + i))
-                heat_map = heat_maps[0]
-                
-                vis.heatmap(X=heat_map[gt_classes.argmax()],
-                    opts=dict(title=classes_name[gt_classes.argmax()] + ' {}'.format(k),
-                        caption='{} iteration heatmap'.format(episode * epoch + i)))
-
-                print(heat_map[gt_classes.argmax()].shape)
-                log.image_summary('{} epoch {}th heatmap'.format(epoch, k), heat_map[gt_classes.argmax()], epoch * 32 + k)
+            #vis.text('{} Input image'.format(episode * epoch + i))
+            vis.image(input_image,
+                opts=dict(title='Raw Image', 
+                    caption='{} iteration input image'.format(episode * epoch + i)))
+            print(gt_classes)
+            #vis.text('{} HeatMap'.format(episode * epoch + i))
+            heat_map = output.data.cpu().numpy()[0]
+            
+            vis.heatmap(X=heat_map[gt_classes.argmax()],
+                opts=dict(title=classes_name[gt_classes.argmax()]))
 
         # print("Output size: ",output.size())
         # print("Target size: ", target_var.size())
 
         loss = criterion(pool_res, target_var)
-        
+        log.scalar_summary('training_loss', loss, episode * epoch + i)
 
         # measure metrics and record loss
         m1 = metric1(pool_res.data, target)
@@ -280,11 +264,6 @@ def train(train_loader, model, criterion, optimizer, epoch, log, vis):
         losses.update(loss.data[0], input.size(0))
         avg_m1.update(m1[0], input.size(0))
         avg_m2.update(m2[0], input.size(0))
-
-        global_step = episode * epoch + i
-        log.scalar_summary('training_loss', loss, global_step)
-        log.scalar_summary('metric1', m1[0], global_step)
-        log.scalar_summary('metric2', m2[0], global_step)
         
         # TODO: 
         # compute gradient and do SGD step
