@@ -20,6 +20,7 @@ import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 import torchvision.models as models
 
+import matplotlib.pyplot as plt
 import cv2
 import visdom
 import _init_paths
@@ -163,7 +164,7 @@ def main():
     # TODO: You can pass the logger objects to train(), make appropriate
     # modifications to train()
 
-    train_log = Logger(os.path.join(os.getcwd(), 'log'), 'freeloc')
+    log = Logger(os.path.join(os.getcwd(), 'log'), 'freeloc_test')
     
 
     print("start training!")
@@ -175,11 +176,11 @@ def main():
         adjust_learning_rate(optimizer, epoch)
 
         # train for one epoch
-        train(train_loader, model, criterion, optimizer, epoch, train_log, vis)
+        train(train_loader, model, criterion, optimizer, epoch, log, vis)
 
         # evaluate on validation set
         if epoch%args.eval_freq==0 or epoch==args.epochs-1:
-            m1, m2 = validate(val_loader, model, criterion)
+            m1, m2 = validate(val_loader, model, criterion, epoch, log, vis)
             score = m1*m2
             # remember best prec@1 and save checkpoint
             is_best =  score > best_prec1
@@ -247,26 +248,29 @@ def train(train_loader, model, criterion, optimizer, epoch, log, vis):
 
             log.image_summary('{} epoch input image'.format(epoch), input_images, epoch)
             
-
-            for k in range(32):
+            img_num = input_images.shape[0]
+            for k in range(img_num):
                 gt_classes = all_gt_classes[k]
                 input_image = input_images[k]
                 input_image = inv_normalize(input_image)
                 
                 #vis.text('{} Input image'.format(episode * epoch + i))
                 vis.image(input_image,
-                    opts=dict(title='Raw Image {}'.format(k), 
+                    opts=dict(title='Train input epoch_{}_{}'.format(epoch, k), 
                         caption='{} iteration input image'.format(episode * epoch + i)))
-                print(gt_classes)
+                #print(gt_classes)
                 #vis.text('{} HeatMap'.format(episode * epoch + i))
-                heat_map = heat_maps[0]
+                heat_map = heat_maps[k]
                 
                 vis.heatmap(X=heat_map[gt_classes.argmax()],
-                    opts=dict(title=classes_name[gt_classes.argmax()] + ' {}'.format(k),
+                    opts=dict(title='Train HeatMap_' + classes_name[gt_classes.argmax()] + ' {}_{}'.format(epoch, k),
                         caption='{} iteration heatmap'.format(episode * epoch + i)))
 
-                print(heat_map[gt_classes.argmax()].shape)
-                log.image_summary('{} epoch {}th heatmap'.format(epoch, k), heat_map[gt_classes.argmax()], epoch * 32 + k)
+                #print(heat_map[gt_classes.argmax()].shape)
+                cm = plt.get_cmap('plasma')
+                colored_heatmap = cm(heat_map[gt_classes.argmax()])
+                res_heatmap = (colored_heatmap[:, :, :3] * 255).astype(np.uint8).reshape((1, 29, 29, 3))
+                log.image_summary('{} epoch {}th heatmap'.format(epoch, k), res_heatmap, epoch)
 
         # print("Output size: ",output.size())
         # print("Target size: ", target_var.size())
@@ -283,8 +287,8 @@ def train(train_loader, model, criterion, optimizer, epoch, log, vis):
 
         global_step = episode * epoch + i
         log.scalar_summary('training_loss', loss, global_step)
-        log.scalar_summary('metric1', m1[0], global_step)
-        log.scalar_summary('metric2', m2[0], global_step)
+        log.scalar_summary('train_metric1', m1[0], global_step)
+        log.scalar_summary('train_metric2', m2[0], global_step)
         
         # TODO: 
         # compute gradient and do SGD step
@@ -314,12 +318,13 @@ def train(train_loader, model, criterion, optimizer, epoch, log, vis):
         #TODO: Visualize at appropriate intervals
         
 
-def validate(val_loader, model, criterion):
+def validate(val_loader, model, criterion, epoch, log, vis):
     batch_time = AverageMeter()
     losses = AverageMeter()
     avg_m1 = AverageMeter()
     avg_m2 = AverageMeter()
 
+    episode = len(val_loader)
 
     # switch to evaluate mode
     model.eval()
@@ -338,6 +343,34 @@ def validate(val_loader, model, criterion):
         pool_res = F.sigmoid(F.max_pool2d(output, output.size()[2]))
         pool_res = pool_res.view(pool_res.size()[0], -1)
 
+        if i == 0 and epoch % 15 == 0:
+            all_gt_classes = target.cpu().numpy()
+            input_images = input.cpu().numpy()
+            heat_maps = output.data.cpu().numpy()
+
+            log.image_summary('{} epoch input image'.format(epoch), input_images, epoch)
+            
+            img_num = input_images.shape[0]
+            for k in range(img_num):
+                gt_classes = all_gt_classes[k]
+                input_image = input_images[k]
+                input_image = inv_normalize(input_image)
+                
+                #vis.text('{} Input image'.format(episode * epoch + i))
+                vis.image(input_image,
+                    opts=dict(title='validate input epoch_{}_{}'.format(epoch, k), 
+                        caption='{} iteration input image'.format(episode * epoch + i)))
+                #print(gt_classes)
+                #vis.text('{} HeatMap'.format(episode * epoch + i))
+                heat_map = heat_maps[k]
+                
+                vis.heatmap(X=heat_map[gt_classes.argmax()],
+                    opts=dict(title='validate HeatMap_' + classes_name[gt_classes.argmax()] + ' {}_{}'.format(epoch, k),
+                        caption='{} iteration heatmap'.format(episode * epoch + i)))
+
+                #print(heat_map[gt_classes.argmax()].shape)
+                #log.image_summary('{} epoch {}th heatmap'.format(epoch, k), heat_map[gt_classes.argmax()], epoch * 32 + k)
+
 
         loss = criterion(pool_res, target_var)
 
@@ -348,6 +381,11 @@ def validate(val_loader, model, criterion):
         losses.update(loss.data[0], input.size(0))
         avg_m1.update(m1[0], input.size(0))
         avg_m2.update(m2[0], input.size(0))
+
+        global_step = episode * epoch + i
+        log.scalar_summary('validate_loss', loss, global_step)
+        log.scalar_summary('validate_metric1', m1[0], global_step)
+        log.scalar_summary('validate_metric2', m2[0], global_step)
 
         # measure elapsed time
         batch_time.update(time.time() - end)

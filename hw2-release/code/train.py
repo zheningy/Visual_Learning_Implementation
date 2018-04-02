@@ -74,6 +74,8 @@ weight_decay = cfg['TRAIN']['WEIGHT_DECAY']
 disp_interval = cfg['TRAIN']['DISPLAY']
 log_interval = cfg['TRAIN']['LOG_IMAGE_ITERS']
 
+print("lr: {}, momentum: {}, weight_decay: {}".format(lr, momentum, weight_decay))
+
 
 # load imdb and create data later
 imdb = get_imdb(imdb_name)
@@ -154,8 +156,8 @@ for step in range(start_step, end_step+1):
         re_cnt = True
 
     #TODO: evaluate the model every N iterations (N defined in handout)
-    if step%500 == 0:
-        train_log.scalar_summary('training_loss', loss.data[0], step)
+    #if step%500 == 0:
+    train_log.scalar_summary('training_loss', loss.data[0], step)
 
     if step%2000 == 0:
         weight_dict = net.state_dict()
