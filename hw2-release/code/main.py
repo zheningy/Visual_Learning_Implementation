@@ -144,7 +144,7 @@ def main():
     train_sampler = None
     train_loader = torch.utils.data.DataLoader(
         train_dataset, batch_size=args.batch_size, shuffle=(train_sampler is None),
-        num_workers=args.workers, pin_memory=True, sampler=train_sampler)
+        num_workers=args.workers, pin_memory=True, sampler=train_sampler, worker_init_fn=0)
 
     print("Loading test set!")
     val_loader = torch.utils.data.DataLoader(
@@ -154,7 +154,7 @@ def main():
             normalize,
         ])),
         batch_size=args.batch_size, shuffle=False,
-        num_workers=args.workers, pin_memory=True)
+        num_workers=args.workers, pin_memory=True, worker_init_fn=0)
 
     if args.evaluate:
         validate(val_loader, model, criterion)
@@ -230,13 +230,12 @@ def train(train_loader, model, criterion, optimizer, epoch, log, vis):
         input_var = torch.autograd.Variable(input, requires_grad=True)
         target_var = torch.autograd.Variable(target)
 
-
-
         # TODO: Get output from model
         # TODO: Perform any necessary functions on the output
         # TODO: Compute loss using ``criterion``
         # compute output
         output = model(input_var)
+
         # Global pooling and compute Sigmoid
         pool_res = F.sigmoid(F.max_pool2d(output, output.size()[2]))
         pool_res = pool_res.view(pool_res.size()[0], -1)
@@ -244,7 +243,10 @@ def train(train_loader, model, criterion, optimizer, epoch, log, vis):
         if i == 0 and epoch % 15 == 0:
             all_gt_classes = target.cpu().numpy()
             input_images = input.cpu().numpy()
-            heat_maps = output.data.cpu().numpy()
+
+            # Upsampling output to similar size of input image for heatmap
+            upsample = nn.Upsample(scale_factor=17, mode='bilinear', align_corners=True)
+            heat_maps = upsample(output).data.cpu().numpy()
 
             log.image_summary('{} epoch input image'.format(epoch), input_images, epoch)
             
