@@ -19,6 +19,7 @@ from roi_data_layer.layer import RoIDataLayer
 from datasets.factory import get_imdb
 from fast_rcnn.config import cfg, cfg_from_file
 
+import subprocess
 from logger import *
 
 try:
@@ -135,7 +136,7 @@ for step in range(start_step, end_step+1):
     #gt_boxes = blobs['gt_boxes']
 
     # forward
-    net(im_data, rois, im_info, gt_vec, step=step, logger=train_log)
+    net(im_data, rois, im_info, gt_vec)
     loss = net.loss
     train_loss += loss.data[0]
     step_cnt += 1
@@ -156,8 +157,8 @@ for step in range(start_step, end_step+1):
         re_cnt = True
 
     #TODO: evaluate the model every N iterations (N defined in handout)
-    #if step%500 == 0:
-    train_log.scalar_summary('training_loss', loss.data[0], step)
+    if step%500 == 0:
+        train_log.scalar_summary('training_loss', loss.data[0], step)
 
     if step%2000 == 0:
         weight_dict = net.state_dict()
@@ -165,7 +166,8 @@ for step in range(start_step, end_step+1):
             train_log.histo_summary(k, v.cpu().numpy(), step)
 
 
-
+    # if step%5000 == 0:
+    #     subprocess.call("test.py")
 
 
     #TODO: Perform all visualizations here

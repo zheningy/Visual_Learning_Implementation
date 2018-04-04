@@ -18,34 +18,6 @@ import sklearn
 import sklearn.metrics
 
 
-def compute_mAP(output, target):
-    # Calculate mAP
-    gt_cls = target.astype('uint8')
-    pred_cls = output.astype('float32')
-    pred_cls -= 1e-5 * gt_cls
-    mAP = sklearn.metrics.average_precision_score(gt_cls, pred_cls)
-    return mAP
-
-def compute_class_ap(gt, pred, n_out=21, average=None):
-    """
-    Compute the multi-label classification accuracy.
-    gt-groud truth(np.ndarray): Shape Nx20, 0 or 1, 1 if the object i is present in that
-        image.
-    pred-predection (np.ndarray): Shape Nx20, probability of that object in the image
-        (output probablitiy).
-    """
-    nclasses = gt.shape[0]
-    all_ap = []
-    for cid in range(nclasses):
-        gt_cls = gt[cid].astype('uint8')
-        pred_cls = pred[cid].astype('float32')
-        pred_cls -= 1e-5 * gt_cls
-        ap = sklearn.metrics.average_precision_score(
-            gt_cls, pred_cls, average=average)
-        all_ap.append(ap)
-    return all_ap[0:n_out]
-
-
 def nms_detections(pred_boxes, scores, nms_thresh, inds=None):
     dets = np.hstack((pred_boxes,
                       scores[:, np.newaxis])).astype(np.float32)
@@ -115,7 +87,7 @@ class WSDDN(nn.Module):
         return self.cross_entropy
 
     def forward(self, im_data, rois, im_info, gt_vec=None,
-                gt_boxes=None, gt_ishard=None, dontcare_areas=None, step=None, logger=None):
+                gt_boxes=None, gt_ishard=None, dontcare_areas=None):
 
         im_data = network.np_to_variable(im_data, is_cuda=True)
         im_data = im_data.permute(0, 3, 1, 2)
@@ -134,47 +106,11 @@ class WSDDN(nn.Module):
 
         # compute classification stream and detection stream
         reg_cls_score = self.score_cls(x)
-        reg_cls_prob = F.softmax(reg_cls_score, dim=0)
+        reg_cls_prob = F.softmax(reg_cls_score)
         det_score = self.score_det(x)
         det_prob = F.softmax(det_score, dim=0)
         # combine region scores and detection
-        reg_score = torch.mul(reg_cls_prob, det_prob)
-
-        # # NMS
-        # raw_score = reg_score.data.cpu().numpy()
-        # n_img = im_data.shape[0]
-        # n_roi = raw_score.shape[0]
-        # inds = np.array([x for x in range(n_roi)])
-        #
-        # if rois.shape[0] > 0:
-        #     for cls in range(20):
-        #         cls_boxes, cls_scores, cls_inds = nms_detections(rois[:, 1:5], raw_score[:, cls], 0.4, inds=inds)
-        #         select = np.in1d(range(n_roi), cls_inds)
-        #         raw_score[~select, cls] = 0
-
-        # cls_score = network.np_to_variable(raw_score, is_cuda=True)
-        # cls_prob = torch.sum(F.softmax(cls_score, dim=1), 0)
-
-        #print(cls_prob.size())
-
-        cls_prob = torch.sum(reg_score, 0).view(self.n_classes, -1)
-
-        if logger is not None and step is not None:
-            pred_prob = cls_prob.data.cpu().numpy().T
-            gt_prob = gt_vec
-            mAP = compute_mAP(gt_prob[0], pred_prob[0])
-            logger.scalar_summary('mAP', mAP, step)
-            # APs = compute_class_ap(gt_prob[0], pred_prob[0], n_out=5)
-            # for i in len(APs):
-            #     logger.scalar_summary('class_{}'.format(i+1), APs[i], step)
-
-
-
-
-
-        # print(gt_vec)
-        # print("prob")
-        # print(cls_prob)
+        cls_prob = torch.mul(reg_cls_prob, det_prob)
 
         if self.training:
             label_vec = network.np_to_variable(gt_vec, is_cuda=True)
@@ -194,7 +130,9 @@ class WSDDN(nn.Module):
         # output of forward()
         # Checkout forward() to see how it is called
 
-        loss = F.binary_cross_entropy(cls_prob, label_vec)
+        cls_sum = torch.sum(cls_prob, 0)
+
+        loss = F.binary_cross_entropy(cls_sum, label_vec, size_average=False)
 
         return loss
 
