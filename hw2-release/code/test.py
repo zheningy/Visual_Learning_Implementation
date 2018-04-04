@@ -146,6 +146,7 @@ def test_net(name, net, imdb, max_per_image=300, thresh=0.05, visualize=False,
             # TODO: Visualize here using tensorboard
             # TODO: use the logger that is an argument to this function
             print('Visualizing')
+            log.image_summary('detection image/{} step'.format(step), im2show, step)
             #cv2.imshow('test', im2show)
             #cv2.waitKey(1)
 

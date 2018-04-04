@@ -180,6 +180,7 @@ for step in range(start_step, end_step+1):
             print('Logging to Tensorboard')
         if use_visdom:
             print('Logging to visdom')
+            vis.line(X=torch.ones((1,)) * step, Y=, update='append')
 
     
     # Save model occasionally 
