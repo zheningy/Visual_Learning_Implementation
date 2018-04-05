@@ -106,13 +106,15 @@ class WSDDN(nn.Module):
 
         # compute classification stream and detection stream
         reg_cls_score = self.score_cls(x)
-        reg_cls_prob = F.softmax(reg_cls_score)
+        reg_cls_prob = F.softmax(reg_cls_score, dim=1)
         det_score = self.score_det(x)
         det_prob = F.softmax(det_score, dim=0)
         # combine region scores and detection
         cls_prob = torch.mul(reg_cls_prob, det_prob)
 
-        if self.training:
+
+        #if self.training:
+        if gt_vec is not None:
             label_vec = network.np_to_variable(gt_vec, is_cuda=True)
             label_vec = label_vec.view(self.n_classes, -1)
             self.cross_entropy = self.build_loss(cls_prob, label_vec)
@@ -131,8 +133,10 @@ class WSDDN(nn.Module):
         # Checkout forward() to see how it is called
 
         cls_sum = torch.sum(cls_prob, 0)
+        criterion = nn.BCELoss(size_average=False)
+        loss = criterion(cls_sum, label_vec)
 
-        loss = F.binary_cross_entropy(cls_sum, label_vec, size_average=False)
+        #loss = F.binary_cross_entropy(cls_sum, label_vec, size_average=False)
 
         return loss
 

@@ -19,8 +19,9 @@ from roi_data_layer.layer import RoIDataLayer
 from datasets.factory import get_imdb
 from fast_rcnn.config import cfg, cfg_from_file
 
-import subprocess
+import visdom
 from logger import *
+from test import *
 
 try:
     from termcolor import cprint
@@ -50,8 +51,8 @@ lr_decay = 1./10
 
 rand_seed = 1024
 _DEBUG = False
-use_tensorboard = False
-use_visdom = False
+use_tensorboard = True
+use_visdom = True
 log_grads = False
 
 remove_all_log = False   # remove all historical experiments in TensorBoard
@@ -62,7 +63,7 @@ if rand_seed is not None:
     np.random.seed(rand_seed)
 
 # Create training log
-train_log = Logger(os.path.join(os.getcwd(), 'log'), 'wsdnn')
+logger = Logger(os.path.join(os.getcwd(), 'log'), 'wsdnn')
 
 # load config file and get hyperparameters
 cfg_from_file(cfg_file)
@@ -77,6 +78,10 @@ log_interval = cfg['TRAIN']['LOG_IMAGE_ITERS']
 
 print("lr: {}, momentum: {}, weight_decay: {}".format(lr, momentum, weight_decay))
 
+# visdom visualization
+vis = visdom.Visdom(server='http://localhost',port='8097')
+loss_win = vis.line(X=np.zeros((1,)), Y=np.zeros((1,)), opts=dict(title='Training loss'))
+mAP_win = vis.line(X=np.zeros((1,)), Y=np.zeros((1,)), opts=dict(title='mAP curve'))
 
 # load imdb and create data later
 imdb = get_imdb(imdb_name)
@@ -88,11 +93,13 @@ data_layer = RoIDataLayer(roidb, imdb.num_classes)
 net = WSDDN(classes=imdb.classes, debug=_DEBUG)
 network.weights_normal_init(net, dev=0.001)
 if os.path.exists('pretrained_alexnet.pkl'):
-    pret_net = pkl.load(open('pretrained_alexnet.pkl','r'))
+    pret_net = pkl.load(open('pretrained_alexnet.pkl', 'r'))
 else:
     pret_net = model_zoo.load_url('https://download.pytorch.org/models/alexnet-owt-4df8aa71.pth')
-    pkl.dump(pret_net, open('pretrained_alexnet.pkl','wb'), pkl.HIGHEST_PROTOCOL)
+    pkl.dump(pret_net, open('pretrained_alexnet.pkl', 'wb'), pkl.HIGHEST_PROTOCOL)
 own_state = net.state_dict()
+print(own_state.keys())
+print(pret_net.keys())
 for name, param in pret_net.items():
     if name not in own_state:
         continue
@@ -158,16 +165,14 @@ for step in range(start_step, end_step+1):
 
     #TODO: evaluate the model every N iterations (N defined in handout)
     if step%500 == 0:
-        train_log.scalar_summary('training_loss', loss.data[0], step)
+        log_loss = loss.data.cpu().numpy()
+        logger.scalar_summary('training_loss', log_loss, step)
+        vis.line(X=np.ones((1,)) * step, Y=log_loss, win=loss_win, update='append')
 
     if step%2000 == 0:
         weight_dict = net.state_dict()
         for k, v in weight_dict.items():
-            train_log.histo_summary(k, v.cpu().numpy(), step)
-
-
-    # if step%5000 == 0:
-    #     subprocess.call("test.py")
+            logger.histo_summary(k, v.cpu().numpy(), step)
 
 
     #TODO: Perform all visualizations here
@@ -176,11 +181,16 @@ for step in range(start_step, end_step+1):
     #The intervals for different things are defined in the handout
     if visualize and step%vis_interval==0:
         #TODO: Create required visualizations
+        aps = test_net('save_{}'.format(step), net, imdb, visualize=True, logger=logger, step=step)
         if use_tensorboard:
             print('Logging to Tensorboard')
+            for id in range(len(aps)):
+                logger.scalar_summary('class-wise AP/{}th class'.format(id), aps[id], step)
+            logger.scalar_summary('mAP', np.mean(aps), step)
         if use_visdom:
             print('Logging to visdom')
-            vis.line(X=torch.ones((1,)) * step, Y=, update='append')
+
+            vis.line(X=np.ones((1,)) * step, Y=np.array([np.mean(aps)]), win=mAP_win, update='append')
 
     
     # Save model occasionally 

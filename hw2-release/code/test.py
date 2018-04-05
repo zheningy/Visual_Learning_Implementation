@@ -126,8 +126,8 @@ def test_net(name, net, imdb, max_per_image=300, thresh=0.05, visualize=False,
             keep = nms(cls_dets, cfg.TEST.NMS)
             cls_dets = cls_dets[keep, :]
             if visualize:
-                im2show = vis_detections(im2show, imdb.classes[j], cls_dets)
-            all_boxes[j][i] = cls_dets
+                im2show = vis_detections(im2show, imdb.classes[j - 1], cls_dets)
+            all_boxes[j - 1][i] = cls_dets
 
         # Limit to max_per_image detections *over all classes*
         if max_per_image > 0:
@@ -146,7 +146,9 @@ def test_net(name, net, imdb, max_per_image=300, thresh=0.05, visualize=False,
             # TODO: Visualize here using tensorboard
             # TODO: use the logger that is an argument to this function
             print('Visualizing')
-            log.image_summary('detection image/{} step'.format(step), im2show, step)
+            width, heigh, channel = im2show.shape
+            im2res = cv2.cvtColor(im2show, cv2.COLOR_BGR2RGB)
+            logger.image_summary('detection image/{}th'.format(i), im2res.reshape((1, width, heigh, channel)), step)
             #cv2.imshow('test', im2show)
             #cv2.waitKey(1)
 
