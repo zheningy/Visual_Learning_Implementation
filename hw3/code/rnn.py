@@ -1,14 +1,24 @@
 import argparse
+import os
+import shutil
+import time
+import sys
 import sklearn
 import sklearn.metrics
 
 import torch
 import torch.nn as nn
 import torch.nn.parallel
+import torch.nn.functional as F
+import torch.backends.cudnn as cudnn
+import torch.distributed as dist
 import torch.optim
 import torch.utils.data
 import torch.utils.data.distributed
-
+from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
+import torchvision.transforms as transforms
+import torchvision.datasets as datasets
+import torchvision.models as models
 
 import pickle
 import random
@@ -25,9 +35,9 @@ parser.add_argument('--epochs', default=100, type=int, metavar='N',
                     help='number of total epochs to run')
 parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
-parser.add_argument('-b', '--batch-size', default=256, type=int,
+parser.add_argument('-b', '--batch-size', default=20, type=int,
                     metavar='N', help='mini-batch size (default: 256)')
-parser.add_argument('--lr', '--learning-rate', default=1e-2, type=float,
+parser.add_argument('--lr', '--learning-rate', default=1e-3, type=float,
                     metavar='LR', help='initial learning rate')
 parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
                     help='momentum')
@@ -58,13 +68,15 @@ def get_data(file, shuffle=False):
 def main():
     global args
     args = parser.parse_args()
-    model = SimpleNet()
-    model.classifer = torch.nn.DataParallel(model.classifer)
-    model.cuda()
+    model = RNN(num_classes=51, input_size=512, hidden_size=256, batch_size=args.batch_size, num_layers=3, use_gpu=True).cuda()
+
+    #model = nn.RNN(512, 512, 2, nonlinearity='relu', batch_first=True)
+    model = torch.nn.DataParallel(model)
+
 
     print("model loaded")
 
-    criterion = nn.BCELoss().cuda()
+    criterion = nn.CrossEntropyLoss()
     # optimizer = torch.optim.Adam(model.parameters(), args.lr)
     optimizer = torch.optim.SGD(model.parameters(), args.lr,
                                 momentum=args.momentum,
@@ -91,7 +103,7 @@ def main():
         val_dataset, batch_size=args.batch_size, shuffle=False,#(train_sampler is None),
         num_workers=args.workers, pin_memory=True)
 
-    log = Logger(os.path.join(os.getcwd(), 'log'), 'sheep_net')
+    log = Logger(os.path.join(os.getcwd(), 'log'), 'rnn')
     print("start training!")
 
     for epoch in range(args.start_epoch, args.epochs):
@@ -112,34 +124,32 @@ def main():
         test_dataset, batch_size=args.batch_size, shuffle=False,#(train_sampler is None),
         num_workers=args.workers, pin_memory=True)
 
-    test(test_loader, model)
-
+    #test(test_loader, model)
 
 
 def train(train_loader, model, criterion, optimizer, epoch, log):
-    """
-    Train the model
-    :param train_loader:
-    :param model:
-    :param criterion:
-    :param optimizer:
-    :param epoch:
-    :param log:
-    :return:
-    """
     model.train()
-
     for i, (features, target) in enumerate(train_loader):
+        batch_size = features.size(0)
+        model.batch_size = batch_size
+
         target = target.type(torch.FloatTensor).cuda(async=True)
         target = target.view(-1, target.size()[2])
         target_var = torch.autograd.Variable(target)
 
-        features = features.view(features.size(0), -1)
+        # _, target = torch.max(target, 2)
+        # target = target.type(torch.LongTensor).cuda(async=True)
+        # target = target.view(target.size()[0])
+        # target_var = torch.autograd.Variable(target)
+        features = features.permute(1, 0, 2)
         input_var = torch.autograd.Variable(features, requires_grad=True)
 
-        output = model(input_var)
+        output = model(input_var, 10)
 
-        #output = torch.cat([model(torch.autograd.Variable(features[x], requires_grad=True)) for x in range(features.shape[0])], 0)
+        # print(output)
+        # print(target_var)
+        # sys.exit()
+
         #loss = criterion(output, target_var)
         loss = torch.mean(-torch.log(torch.sum(output*target_var, 1)))
         log.scalar_summary('training_loss', loss, epoch)
@@ -150,54 +160,62 @@ def train(train_loader, model, criterion, optimizer, epoch, log):
 
 
 def validate(val_loader, model, criterion, epoch, log):
-    """
-    evaluate the model during training
-    :param val_loader:
-    :param model:
-    :param criterion:
-    :param epoch:
-    :param log:
-    :return:
-    """
-    avg_m1 = AverageMeter()
     model.eval()
 
     for i, (features, target) in enumerate(val_loader):
+        batch_size = features.size(0)
+        model.batch_size = batch_size
+
         target = target.type(torch.FloatTensor).cuda(async=True)
         target = target.view(-1, target.size()[2])
-        target_var = torch.autograd.Variable(target, volatile=True)
+        target_var = torch.autograd.Variable(target)
 
-        features = features.view(features.size(0), -1)
+        # _, target = torch.max(target, 2)
+        # target = target.type(torch.LongTensor).cuda(async=True)
+        # target = target.view(target.size()[0])
+        # target_var = torch.autograd.Variable(target, volatile=True)
+
+        features = features.permute(1, 0, 2)
         input_var = torch.autograd.Variable(features, volatile=True)
-        output = model(input_var)
+
+        output = model(input_var, 10)
+
 
         #loss = criterion(output, target_var)
         loss = torch.mean(-torch.log(torch.sum(output * target_var, 1)))
-        m1 = metric1(output.data, target_var.data)
         prec = precision(output.data, target_var.data)
 
-        avg_m1.update(m1[0], features.size(0))
         log.scalar_summary('validate_loss', loss, epoch)
-        log.scalar_summary('validate_mAP', m1[0], epoch)
         log.scalar_summary('precision', prec[0], epoch)
 
-    return prec
+    return prec[0]
 
 
-def test(test_loader, model):
-    model.eval()
-    test_res = open("result/task1_res.txt", "w")
-
-    for i, (features) in enumerate(test_loader):
-        features = features.view(features.size(0), -1)
-        input_var = torch.autograd.Variable(features, volatile=True)
-        output = model(input_var)
-
-        curt_res = output.data.cpu().numpy()
-        pred = np.argmax(curt_res, axis=1)
-        for i in pred:
-            test_res.write(str(i))
-            test_res.write('\n')
+# def test(test_loader, model):
+#     model.eval()
+#     test_res = open("result/task2_res.txt", "w")
+#
+#     for i, (features) in enumerate(test_loader):
+#         batch_size = features.size(0)
+#         hidden = Variable(torch.zeros(2, batch_size, 512).cuda())
+#         #hidden = model.initHidden()
+#
+#         target = target.type(torch.FloatTensor)
+#         target = target.view(-1, target.size()[2])
+#         target_var = torch.autograd.Variable(target, volatile=True)
+#
+#         input_var = torch.autograd.Variable(features, volatile=True)
+#         packed = pack_padded_sequence(input_var, [10]*batch_size, batch_first=True)
+#
+#         output, hidden = model(packed, hidden)
+#
+#         output, _ = pad_packed_sequence(output, batch_first=True)
+#
+#         curt_res = output.data.cpu().numpy()
+#         pred = np.argmax(curt_res, axis=1)
+#         for i in pred:
+#             test_res.write(str(i))
+#             test_res.write('\n')
 
 
 
@@ -223,6 +241,7 @@ class AverageMeter(object):
 def precision(output, target):
     gt = target.cpu().numpy()
     pred = output.cpu().numpy()
+    #gt_cls = gt
     gt_cls = np.argmax(gt, axis=1)
     pred_cls = np.argmax(pred, axis=1)
     return [sklearn.metrics.precision_score(gt_cls, pred_cls, average='macro')]
