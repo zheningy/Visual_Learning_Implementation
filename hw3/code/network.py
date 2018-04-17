@@ -61,43 +61,87 @@ class RNN(nn.Module):
 
     def __init__(self, num_classes=51, input_size=512, hidden_size=128, batch_size=1, num_layers=2, use_gpu=True):
         super(RNN, self).__init__()
-        self.num_classes = num_classes
-        self.input_size = input_size
-        self.hidden_size = hidden_size
-        self.batch_size = batch_size
-        self.num_layers = num_layers
-        self.use_gpu = use_gpu
+        self.LSTM1 = nn.LSTM(input_size, 512, 1, batch_first=True, bidirectional=True)
+        self.LSTM2 = nn.LSTM(1024, 512, 1, batch_first=True, bidirectional=True)
+        self.fc = nn.Linear(1024, num_classes)
 
-        self.rnn = nn.GRU(input_size=input_size, num_layers=num_layers, hidden_size=hidden_size, batch_first=True, dropout=1)
-        self.fc = nn.Linear(hidden_size, num_classes)
-        self.relu = nn.ReLU()
-        self.softmax = nn.Softmax()
 
-    def forward(self, embedded, seq_len):
-        hidden = self.init_hidden(seq_len)
+    def forward(self, x):
+        x, _ = self.LSTM1(x)
+        x, _ = self.LSTM2(x)
+        x = self.fc(x)
+        #x = x[:, -1, :]
+        return x.cuda()
 
-        # Pack them up nicely
 
-        embedded = embedded.view(seq_len, self.batch_size, self.input_size)
-        #print(embedded.size())
-        # propagate input through RNN
-        out, hidden = self.rnn(embedded, hidden)
-        # print(out.size())
-        # print(hidden.size())
-        out = self.relu(out)
-        out = self.fc(out[-1])
-        out = self.softmax(out)
-        if self.use_gpu:
-            out = out.cuda()
 
-        return out
 
-    def init_hidden(self, seq_len):
+# class RNN(nn.Module):
+#
+#     def __init__(self, num_classes=51, input_size=512, hidden_size=128, batch_size=1, num_layers=2, use_gpu=True):
+#         super(RNN, self).__init__()
+#         self.num_classes = num_classes
+#         self.input_size = input_size
+#         self.hidden_size = hidden_size
+#         self.batch_size = batch_size
+#         self.num_layers = num_layers
+#         self.use_gpu = use_gpu
+#
+#         self.rnn = nn.LSTM(input_size=input_size, hidden_size=hidden_size, num_layers=num_layers, batch_first=True)
+#         self.fc = nn.Linear(hidden_size, num_classes)
+#
+#     def forward(self, x):
+#         h0 = Variable(torch.zeros(self.num_layers, x.size(0), self.hidden_size)).cuda()
+#
+#         c0 = Variable(torch.zeros(self.num_layers, x.size(0), self.hidden_size)).cuda()
+#         out, _ = self.rnn(x, (h0, c0))
+#         output = self.fc(out[:, -1, :])
+#
+#         return output.cuda()
 
-        if self.use_gpu:
-            return Variable(torch.zeros(self.num_layers, seq_len, self.hidden_size), requires_grad=True).cuda()
 
-        return Variable(torch.zeros(self.num_layers, seq_len, self.hidden_size), requires_grad=True)
+
+# class RNN(nn.Module):
+#
+#     def __init__(self, num_classes=51, input_size=512, hidden_size=128, batch_size=1, num_layers=2, use_gpu=True):
+#         super(RNN, self).__init__()
+#         self.num_classes = num_classes
+#         self.input_size = input_size
+#         self.hidden_size = hidden_size
+#         self.batch_size = batch_size
+#         self.num_layers = num_layers
+#         self.use_gpu = use_gpu
+#
+#         self.rnn = nn.GRU(input_size=input_size, hidden_size=hidden_size, num_layers=num_layers, batch_first=True)
+#         self.fc = nn.Linear(hidden_size, num_classes)
+#         self.relu = nn.ReLU()
+#         self.softmax = nn.Softmax()
+#
+#     def forward(self, embedded, seq_len):
+#         hidden = self.init_hidden(seq_len)
+#
+#         # Pack them up nicely
+#
+#         embedded = embedded.view(seq_len, self.batch_size, self.input_size)
+#         #print(embedded.size())
+#         # propagate input through RNN
+#         out, hidden = self.rnn(embedded, hidden)
+#         # print(out.size())
+#         # print(hidden.size())
+#         out = self.relu(out)
+#         out = self.fc(out[-1])
+#         out = self.softmax(out)
+#         if self.use_gpu:
+#             out = out.cuda()
+#
+#         return out
+#
+#     def init_hidden(self, seq_len):
+#
+#         if self.use_gpu:
+#             return Variable(torch.zeros(self.num_layers, seq_len, self.hidden_size), requires_grad=True).cuda()
+#
+#         return Variable(torch.zeros(self.num_layers, seq_len, self.hidden_size), requires_grad=True)
 
 
 # class RNN(nn.Module):

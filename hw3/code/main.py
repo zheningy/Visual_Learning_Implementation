@@ -128,7 +128,7 @@ def train(train_loader, model, criterion, optimizer, epoch, log):
     :return:
     """
     model.train()
-
+    train_loss = AverageMeter()
     for i, (features, target) in enumerate(train_loader):
         target = target.type(torch.FloatTensor).cuda(async=True)
         target = target.view(-1, target.size()[2])
@@ -142,11 +142,12 @@ def train(train_loader, model, criterion, optimizer, epoch, log):
         #output = torch.cat([model(torch.autograd.Variable(features[x], requires_grad=True)) for x in range(features.shape[0])], 0)
         #loss = criterion(output, target_var)
         loss = torch.mean(-torch.log(torch.sum(output*target_var, 1)))
-        log.scalar_summary('training_loss', loss, epoch)
+        train_loss.update(loss)
 
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
+    log.scalar_summary('training_loss', train_loss.avg, epoch)
 
 
 def validate(val_loader, model, criterion, epoch, log):
@@ -160,6 +161,8 @@ def validate(val_loader, model, criterion, epoch, log):
     :return:
     """
     avg_m1 = AverageMeter()
+    prec = AverageMeter()
+    val_loss = AverageMeter()
     model.eval()
 
     for i, (features, target) in enumerate(val_loader):
@@ -174,14 +177,15 @@ def validate(val_loader, model, criterion, epoch, log):
         #loss = criterion(output, target_var)
         loss = torch.mean(-torch.log(torch.sum(output * target_var, 1)))
         m1 = metric1(output.data, target_var.data)
-        prec = precision(output.data, target_var.data)
+        prec.update(precision(output.data, target_var.data))
+        val_loss.update(loss)
 
         avg_m1.update(m1[0], features.size(0))
-        log.scalar_summary('validate_loss', loss, epoch)
-        log.scalar_summary('validate_mAP', m1[0], epoch)
-        log.scalar_summary('precision', prec[0], epoch)
+    log.scalar_summary('validate_loss', val_loss.avg, epoch)
+    log.scalar_summary('validate_mAP', avg_m1.avg, epoch)
+    log.scalar_summary('precision', prec.avg, epoch)
 
-    return prec
+    return prec.avg
 
 
 def test(test_loader, model):
@@ -225,7 +229,7 @@ def precision(output, target):
     pred = output.cpu().numpy()
     gt_cls = np.argmax(gt, axis=1)
     pred_cls = np.argmax(pred, axis=1)
-    return [sklearn.metrics.precision_score(gt_cls, pred_cls, average='macro')]
+    return sklearn.metrics.precision_score(gt_cls, pred_cls, average='macro')
 
 
 
