@@ -61,7 +61,7 @@ class RNN(nn.Module):
 
     def __init__(self, num_classes=51, input_size=512, hidden_size=128, batch_size=1, num_layers=2, use_gpu=True):
         super(RNN, self).__init__()
-        self.LSTM1 = nn.LSTM(input_size, 512, 1, batch_first=True, bidirectional=True)
+        self.LSTM1 = nn.LSTM(input_size, 512, 1, batch_first=True, bidirectional=True, dropout=0.5)
         self.LSTM2 = nn.LSTM(1024, 512, 1, batch_first=True, bidirectional=True)
         self.fc = nn.Linear(1024, num_classes)
 
