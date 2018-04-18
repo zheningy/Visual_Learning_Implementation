@@ -1,9 +1,4 @@
-import os
-import sys
-import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from torch.autograd import Variable
 import torch.utils.data as data
 import numpy as np
 
@@ -70,35 +65,7 @@ class RNN(nn.Module):
         x, _ = self.LSTM1(x)
         x, _ = self.LSTM2(x)
         x = self.fc(x)
-        #x = x[:, -1, :]
         return x.cuda()
-
-
-
-
-# class RNN(nn.Module):
-#
-#     def __init__(self, num_classes=51, input_size=512, hidden_size=128, batch_size=1, num_layers=2, use_gpu=True):
-#         super(RNN, self).__init__()
-#         self.num_classes = num_classes
-#         self.input_size = input_size
-#         self.hidden_size = hidden_size
-#         self.batch_size = batch_size
-#         self.num_layers = num_layers
-#         self.use_gpu = use_gpu
-#
-#         self.rnn = nn.LSTM(input_size=input_size, hidden_size=hidden_size, num_layers=num_layers, batch_first=True)
-#         self.fc = nn.Linear(hidden_size, num_classes)
-#
-#     def forward(self, x):
-#         h0 = Variable(torch.zeros(self.num_layers, x.size(0), self.hidden_size)).cuda()
-#
-#         c0 = Variable(torch.zeros(self.num_layers, x.size(0), self.hidden_size)).cuda()
-#         out, _ = self.rnn(x, (h0, c0))
-#         output = self.fc(out[:, -1, :])
-#
-#         return output.cuda()
-
 
 
 # class RNN(nn.Module):

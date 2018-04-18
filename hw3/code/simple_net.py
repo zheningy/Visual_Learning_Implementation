@@ -9,6 +9,7 @@ import torch.optim
 import torch.utils.data
 import torch.utils.data.distributed
 
+
 import pickle
 import random
 from network import *
@@ -20,7 +21,7 @@ parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
 parser.add_argument('--arch', default='localizer_alexnet')
 parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
                     help='number of data loading workers (default: 4)')
-parser.add_argument('--epochs', default=300, type=int, metavar='N',
+parser.add_argument('--epochs', default=100, type=int, metavar='N',
                     help='number of total epochs to run')
 parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
@@ -30,7 +31,7 @@ parser.add_argument('--lr', '--learning-rate', default=1e-2, type=float,
                     metavar='LR', help='initial learning rate')
 parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
                     help='momentum')
-parser.add_argument('--weight-decay', '--wd', default=0.0001, type=float,
+parser.add_argument('--weight-decay', '--wd', default=0.01, type=float,
                     metavar='W', help='weight decay (default: 1e-4)')
 parser.add_argument('--print-freq', '-p', default=10, type=int,
                     metavar='N', help='print frequency (default: 10)')
@@ -57,15 +58,17 @@ def get_data(file, shuffle=False):
 def main():
     global args
     args = parser.parse_args()
-    model = RNN(num_classes=51, input_size=512, hidden_size=512, batch_size=args.batch_size, num_layers=2, use_gpu=True).cuda()
-
-    model = torch.nn.DataParallel(model)
-
+    model = SimpleNet()
+    model.classifer = torch.nn.DataParallel(model.classifer)
+    model.cuda()
 
     print("model loaded")
 
     criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(model.parameters(), 1e-4)
+    # optimizer = torch.optim.Adam(model.parameters(), args.lr)
+    optimizer = torch.optim.SGD(model.parameters(), args.lr,
+                                momentum=args.momentum,
+                                weight_decay=args.weight_decay)
 
     print("Loss function and optimizer decided!")
 
@@ -88,111 +91,113 @@ def main():
         val_dataset, batch_size=args.batch_size, shuffle=False,#(train_sampler is None),
         num_workers=args.workers, pin_memory=True)
 
-    log = Logger(os.path.join(os.getcwd(), 'log'), 'rnn_3')
+    log = Logger(os.path.join(os.getcwd(), 'log'), 'sheep_net')
     print("start training!")
 
     for epoch in range(args.start_epoch, args.epochs):
         print("Epoch %d", epoch)
+
+        adjust_learning_rate(optimizer, epoch)
 
         # train for one epoch
         train(train_loader, model, criterion, optimizer, epoch, log)
 
         # evaluate on validation set
         if epoch%args.eval_freq == 0 or epoch == args.epochs-1:
-            acc, over = validate(val_loader, model, criterion, epoch, log)
+            acc = validate(val_loader, model, criterion, epoch, log)
             print("current accuracy: {}".format(acc))
-            if over is True:
-                break
 
     print("Loading test set!")
     test_loader = torch.utils.data.DataLoader(
-        test_dataset, batch_size=args.batch_size, shuffle=False,
+        test_dataset, batch_size=args.batch_size, shuffle=False,#(train_sampler is None),
         num_workers=args.workers, pin_memory=True)
 
     test(test_loader, model)
 
 
+
 def train(train_loader, model, criterion, optimizer, epoch, log):
+    """
+    Train the model
+    :param train_loader:
+    :param model:
+    :param criterion:
+    :param optimizer:
+    :param epoch:
+    :param log:
+    :return:
+    """
     model.train()
     train_loss = AverageMeter()
     for i, (features, target) in enumerate(train_loader):
-        batch_size = features.size(0)
-        model.batch_size = batch_size
-
-        _, target = torch.max(target, 2)
-        target = target.type(torch.LongTensor).cuda(async=True)
-        target = target.view(target.size()[0])
+        target = target.type(torch.FloatTensor).cuda(async=True)
+        target = target.view(-1, target.size()[2])
         target_var = torch.autograd.Variable(target)
-        input_var = torch.autograd.Variable(features, requires_grad=True).cuda()
+
+        features = features.view(features.size(0), -1)
+        input_var = torch.autograd.Variable(features, requires_grad=True)
 
         output = model(input_var)
-        output = torch.mean(output, 1)
 
-        loss = criterion(output, target_var)
+        #output = torch.cat([model(torch.autograd.Variable(features[x], requires_grad=True)) for x in range(features.shape[0])], 0)
+        #loss = criterion(output, target_var)
+        loss = torch.mean(-torch.log(torch.sum(output*target_var, 1)))
         train_loss.update(loss)
-        #loss = torch.mean(-torch.log(torch.sum(output*target_var, 1)))
-
 
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-
     log.scalar_summary('training_loss', train_loss.avg, epoch)
 
 
 def validate(val_loader, model, criterion, epoch, log):
-    model.eval()
-    over = False
+    """
+    evaluate the model during training
+    :param val_loader:
+    :param model:
+    :param criterion:
+    :param epoch:
+    :param log:
+    :return:
+    """
     prec = AverageMeter()
     val_loss = AverageMeter()
+    model.eval()
 
     for i, (features, target) in enumerate(val_loader):
-        batch_size = features.size(0)
-        model.batch_size = batch_size
-
-        _, target = torch.max(target, 2)
-        target = target.type(torch.LongTensor).cuda(async=True)
-        target = target.view(target.size()[0])
+        target = target.type(torch.FloatTensor).cuda(async=True)
+        target = target.view(-1, target.size()[2])
         target_var = torch.autograd.Variable(target, volatile=True)
 
+        features = features.view(features.size(0), -1)
         input_var = torch.autograd.Variable(features, volatile=True)
-
         output = model(input_var)
-        output = torch.mean(output, 1)
 
-        loss = criterion(output, target_var)
-        #loss = torch.mean(-torch.log(torch.sum(output * target_var, 1)))
+        #loss = criterion(output, target_var)
+        loss = torch.mean(-torch.log(torch.sum(output * target_var, 1)))
         prec.update(precision(output.data, target_var.data))
         val_loss.update(loss)
 
     log.scalar_summary('validate_loss', val_loss.avg, epoch)
     log.scalar_summary('precision', prec.avg, epoch)
-    if prec.avg > 0.15:
-        over = True
-        print("Reach 15%!: ", prec.avg)
 
-    return prec.avg, over
+    return prec.avg
 
 
 def test(test_loader, model):
     model.eval()
-    test_res = open("result/task2_res_adam.txt", "w")
+    test_res = open("result/task1_res.txt", "w")
 
     for i, (features) in enumerate(test_loader):
-        batch_size = features.size(0)
-        model.batch_size = batch_size
-
+        features = features.view(features.size(0), -1)
         input_var = torch.autograd.Variable(features, volatile=True)
-
         output = model(input_var)
-        output = torch.mean(output, 1)
 
         curt_res = output.data.cpu().numpy()
         pred = np.argmax(curt_res, axis=1)
         for i in pred:
             test_res.write(str(i))
             test_res.write('\n')
-
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""
@@ -215,10 +220,16 @@ class AverageMeter(object):
 def precision(output, target):
     gt = target.cpu().numpy()
     pred = output.cpu().numpy()
-    gt_cls = gt
-    #gt_cls = np.argmax(gt, axis=1)
+    gt_cls = np.argmax(gt, axis=1)
     pred_cls = np.argmax(pred, axis=1)
     return sklearn.metrics.precision_score(gt_cls, pred_cls, average='macro')
+
+
+def adjust_learning_rate(optimizer, epoch):
+    """Sets the learning rate to the initial LR decayed by 10 every 30 epochs"""
+    lr = args.lr * (0.1 ** (epoch // 30))
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = lr
 
 
 if __name__ == '__main__':
