@@ -1,3 +1,3 @@
-# 16824_hw
+# Visual_Learning_Implementation
 
-This repository contains all three homework for CMU 18Spring 16824
+This repository contains DNN implementation for visual learning job, like object classifaction, detection and action recognition.
