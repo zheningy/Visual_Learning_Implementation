@@ -1,0 +1,7 @@
+*.pth
+*.pkl
+*.tar
+
+log/
+model/
+data/
